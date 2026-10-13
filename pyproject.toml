@@ -66,7 +66,7 @@ dev = [
 # Install with: pip install 'socid-extractor[ai]'
 # Enables the AI fallback extractor: extract(page, use_ai_fallback=True).
 # Optional — `openai` is imported lazily, only when the flag is on and a key is set.
-ai = ["openai>=1.0,<3.0"]
+ai = ["openai>=1.0,<4.0"]
 
 [project.urls]
 Homepage = "https://github.com/soxoj/socid-extractor"
@@ -78,6 +78,9 @@ Funding = "https://www.patreon.com/soxoj"
 [project.scripts]
 # Run with: socid_extractor <url>
 socid_extractor = "socid_extractor.cli:run"
+# The package installs as socid-extractor and the repo is named that way too,
+# so that is what people type. The import name has to keep the underscore.
+socid-extractor = "socid_extractor.cli:run"
 
 [tool.setuptools.dynamic]
 version = {attr = "socid_extractor.__version__"}

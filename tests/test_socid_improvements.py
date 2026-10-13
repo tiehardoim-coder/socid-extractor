@@ -1344,6 +1344,119 @@ def test_orcid_url_mutations_target_five_platforms():
 # Structural / meta tests
 # ---------------------------------------------------------------------------
 
+def test_discourse_mutation_covers_the_shapes_maigret_stores():
+    """maigret keeps Discourse accounts as {urlMain}/u/{username}/summary."""
+    from socid_extractor.main import mutate_url
+
+    def mutated(url):
+        return [u for u, _ in mutate_url(url) if u.endswith('.json')]
+
+    # the plain profile link, and the /summary one that goes into the database
+    assert mutated('https://forum.ansible.com/u/sivel') == ['https://forum.ansible.com/u/sivel.json']
+    assert mutated('https://forum.ansible.com/u/sivel/summary') == ['https://forum.ansible.com/u/sivel.json']
+    # a forum living under a path, with the doubled slash the database renders
+    assert mutated('https://www.freecodecamp.org/forum//u/JeremyLT/summary') == [
+        'https://www.freecodecamp.org/forum/u/JeremyLT.json']
+    # dots belong in Discourse usernames
+    assert mutated('https://forum.cs-cart.ru/u/a.shishkin/summary') == [
+        'https://forum.cs-cart.ru/u/a.shishkin.json']
+    # but an already mutated URL must not collect a second .json
+    assert mutated('https://forum.ansible.com/u/sivel.json') == []
+    # and a thread is not a profile
+    assert mutated('https://discuss.python.org/t/some-thread/1234') == []
+
+
+def test_discourse_html_only_fires_on_a_profile():
+    """Every page of a forum has the generator tag and other people's avatars."""
+    shell = (
+        '<meta name="generator" content="Discourse 2026.9.0-latest - https://github.com/discourse/discourse">'
+        '<meta id="data-discourse-setup" data-discourse_theme_id="2">'
+        '<meta property="og:image" content="https://cdn/user_avatar/forum.example/someone/45/1_2.png">'
+    )
+    profile = shell + '<link rel="canonical" href="https://forum.example/u/sivel">'
+    topic = shell + '<link rel="canonical" href="https://forum.example/t/some-thread/1234">'
+
+    assert extract(profile).get('username') == 'sivel'
+    # a thread names whoever posted in it first — that is not the page's subject
+    assert extract(topic) == {}
+    # instances that refuse anonymous profiles still serve the canonical link, so a
+    # username with nothing of the account's own attached is the request echoed back
+    deny = ('<meta name="generator" content="Discourse 2026.9.0-latest">'
+            '<meta id="data-discourse-setup" data-discourse_theme_id="2">'
+            '<link rel="canonical" href="https://forum.example/u/sivel">')
+    assert extract(deny) == {}
+
+    
+def test_a_broken_transform_skips_only_its_own_scheme():
+    """A transform that gives up must not take the rest of the page with it."""
+    from socid_extractor.schemes import schemes
+
+    marker = '"pipeline-guard-fixture"'
+    # transform() turns a PROCESS_ERRORS failure into {} — a dict, not the '{}'
+    # string json.loads expects. Chains ending in json.dumps paper over it; this
+    # one ends on the failure, like Reddit, DeviantArt and SlideShare do.
+    broken = {
+        'flags': [marker],
+        'regex': r'^([\s\S]+)$',
+        'extract_json': True,
+        'transforms': [lambda x: json.loads(x)['missing']],
+    }
+    working = {
+        'flags': [marker],
+        'regex': r'^([\s\S]+)$',
+        'extract_json': True,
+        'transforms': [json.loads, lambda x: {'username': x['user']}, json.dumps],
+        'fields': {'username': lambda x: x.get('username')},
+    }
+
+    original = dict(schemes)
+    schemes.clear()
+    schemes.update({'Broken fixture': broken, 'Working fixture': working, **original})
+    try:
+        info = extract('{"pipeline-guard-fixture": 1, "user": "bob"}')
+    finally:
+        schemes.clear()
+        schemes.update(original)
+
+    assert info.get('username') == 'bob'
+    
+    
+def test_patreon_rsc_deref_reads_hex_row_ids():
+    """Patreon's RSC row ids are hex — a decimal pattern quietly loses row 10 and up."""
+    from socid_extractor.schemes import _patreon_rsc_deref
+
+    rsc = '2:{"a":1}\n5f:Tb,hello there\n60:T5,short\n'
+
+    assert _patreon_rsc_deref(rsc, '{"bio":"$5f"}') == '{"bio":"hello there"}'
+    assert _patreon_rsc_deref(rsc, '{"bio":"$60"}') == '{"bio":"short"}'
+    # a reference to a row that isn't there stays as it is, rather than blowing up
+    assert _patreon_rsc_deref(rsc, '{"bio":"$ff"}') == '{"bio":"$ff"}'
+    # and "$undefined" and friends are not row references at all
+    assert _patreon_rsc_deref(rsc, '{"bio":"$undefined"}') == '{"bio":"$undefined"}'
+
+    
+def test_xenforo_ignores_the_member_listing():
+    """A failed member search falls back to a listing full of other people's ids."""
+    header = ('<meta property="og:url" content="https://forum.example/members/manumuskin.35/" />'
+              '<span class="username" data-user-id="35">manumuskin</span>'
+              '<div class="memberHeader-blurb"><time datetime="2003-07-20T18:23:00-0400"></time>'
+              '<time datetime="2026-09-07T16:59:37-0400"></time></div>'
+              '<a href="/search/member?user_id=35">9,193</a>')
+    profile = extract(header)
+
+    assert profile.get('uid') == '35'
+    assert profile.get('username') == 'manumuskin'
+    assert profile.get('posts_count') == '9193'
+    assert profile.get('created_at') == '2003-07-20T18:23:00-0400'
+    assert profile.get('latest_activity_at') == '2026-09-07T16:59:37-0400'
+
+    # the listing carries member cards, so data-user-id is there — but it belongs
+    # to whoever the forum felt like showing, and og:url points at the listing
+    listing = ('<meta property="og:url" content="https://forum.example/members/" />'
+               '<a href="/members/someone-else.4242/" data-user-id="4242">Someone Else</a>')
+    assert extract(listing) == {}
+
+
 def test_no_flag_subset_shadows():
     """Detect scheme pairs where one's flags are a subset of another's.
 

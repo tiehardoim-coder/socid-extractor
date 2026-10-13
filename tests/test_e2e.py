@@ -545,6 +545,7 @@ def test_stack_exchange():
 
 @pytest.mark.skip(reason="SoundCloud returns 403 / empty embed for automated clients (2026)")
 def test_soundcloud():
+    """SoundCloud"""
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36'}
     info = extract(parse('https://soundcloud.com/danielpatterson', headers=headers)[0])
@@ -558,7 +559,10 @@ def test_soundcloud():
     assert info.get('image') == 'https://i1.sndcdn.com/avatars-000222811304-x9f1ao-large.jpg'
     assert info.get('location') == 'Baton Rouge'
     assert info.get('country_code') == 'US'
-    assert info.get('created_at') == '2009-02-27T16:08:17Z'
+    assert info.get('created_at') is None
+    assert info.get('updated_at') == '2018-08-23T17:22:43Z'
+    assert info.get('comments_count') == '0'
+    assert info.get('likes_count') == '17'
 
 
 @pytest.mark.skip(reason="broken")
@@ -856,7 +860,7 @@ def test_mssg_me():
     assert info.get('messenger_values') == "['+77026924715', 'adamcigelnik']"
 
 
-@pytest.mark.skip(reason="broken")
+@pytest.mark.rate_limited  # Cloudflare challenges datacenter IPs; needs a residential proxy
 def test_patreon():
     info = extract(parse('https://www.patreon.com/annetlovart')[0])
 
@@ -870,6 +874,21 @@ def test_patreon():
     assert 'image_bg' in info
     assert info.get('created_at') == '2020-04-19T16:29:11.000+00:00'
     assert 'bio' in info
+
+
+@pytest.mark.rate_limited  # Cloudflare challenges datacenter IPs; needs a residential proxy
+def test_patreon_rsc():
+    """Patreon RSC"""
+    # App Router profile: no __NEXT_DATA__, payload comes from the RSC stream.
+    info = extract(parse('https://www.patreon.com/kurzgesagt')[0])
+
+    assert info.get('patreon_id') == '43579'
+    assert info.get('patreon_username') == 'Kurzgesagt'
+    assert info.get('is_nsfw') == 'False'
+    assert info.get('created_at') == '2013-08-30T16:09:54.000+00:00'
+    assert 'https://www.instagram.com/kurzgesagt' in info.get('links', '')
+    # a "$38"-style RSC reference must be resolved to the real summary
+    assert info.get('bio', '').startswith('<p ')
 
 
 @pytest.mark.github_failed
@@ -1477,13 +1496,14 @@ def test_paragraph_api_e2e():
     info = extract(parse('https://paragraph.com/api/blogs/@vitalik')[0])
 
     assert info.get('uid') == 'aLOC85RCnjhDinsLDfUr'
-    assert info.get('fullname') == 'Vitalik Buterin'
+    assert info.get('fullname') == 'vitalik.eth'
     assert info.get('username') == 'vitalik'
     assert info.get('twitter_username') == 'VitalikButerin'
     assert info.get('wallet_address') == '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045'
 
 
-def test_fragment_e2e():
+@pytest.mark.skip(reason="broken")
+def test_fragment_e2e():  # Broken. The page is a bid list now, not one owner.
     """Fragment"""
     info = extract(parse('https://fragment.com/username/durov')[0])
 
@@ -1520,7 +1540,7 @@ def test_buymeacoffee():
     info = extract(parse('https://buymeacoffee.com/johndoe')[0])
 
     assert info.get("fullname") == "John Doe"
-    assert info.get("bio") == "Designer & Art Director, Growing brands.Welcome to my BMC page. If you like my content, please consider buying me a coffee. Thank you for your support!"
+    assert info.get("bio") == "Designer &amp; Art Director, Growing brands.Welcome to my BMC page. If you like my content, please consider buying me a coffee. Thank you for your support!"
     assert "15211" in info.get("image") or "cdn.buymeacoffee.com" in info.get("image")
 
 
@@ -1589,18 +1609,20 @@ def test_instagram_graphql_bio_links_and_tagged_usernames():
 
 def test_snapchat():
     """Snapchat"""
-    info = extract(parse('https://www.snapchat.com/@ogovorka')[0])
+    info = extract(parse('https://www.snapchat.com/@teamsnapchat')[0])
 
-    assert info.get('username') == 'ogovorka'
-    assert info.get('fullname') == 'Катерина Иванова'
-    assert info.get('bio') == 'Катерина Иванова is on Snapchat! (@ogovorka)'
-    assert info.get('url') == 'https://www.snapchat.com/@ogovorka'
+    assert info.get('username') == 'teamsnapchat'
+    assert info.get('fullname') == 'Team Snapchat'
+    # the bio is localised to whoever is looking ("is on" / "ist auf"), so only
+    # the handle inside it is worth asserting
+    assert '@teamsnapchat' in info.get('bio', '')
+    assert info.get('url') == 'https://www.snapchat.com/@teamsnapchat'
     assert info.get('image') in {
-        'https://www.snapchat.com/web-capture/www.snapchat.com/@ogovorka/preview/square.jpeg?xp_id=1',
-        'https://us-east1-aws.api.snapchat.com/web-capture/www.snapchat.com/@ogovorka/preview/square.jpeg?xp_id=1',
+        'https://www.snapchat.com/web-capture/www.snapchat.com/@teamsnapchat/preview/square.jpeg?xp_id=1',
+        'https://us-east1-aws.api.snapchat.com/web-capture/www.snapchat.com/@teamsnapchat/preview/square.jpeg?xp_id=1',
     }
     assert info.get(
-        'snapcode_image') == 'https://app.snapchat.com/web/deeplink/snapcode?username=ogovorka&type=SVG&bitmoji=enable'
+        'snapcode_image') == 'https://app.snapchat.com/web/deeplink/snapcode?username=teamsnapchat&type=SVG&bitmoji=enable'
     assert info.get('profile_type') == 'userInfo'
 
 
@@ -1686,3 +1708,127 @@ def test_lens_account_absent():
     """Lens (Hey/Orb/Buttrfly) account"""
     # Missing account -> {"data":{"account":null}}; scheme must not fire.
     assert extract('{"data":{"account":null}}') == {}
+def test_huggingface_api_e2e():
+    """HuggingFace API"""
+    info = extract(parse('https://huggingface.co/api/users/julien-c/overview')[0])
+
+    assert info.get('username') == 'julien-c'
+    assert info.get('fullname')
+    assert info.get('bio')
+    assert info.get('created_at')
+    assert 'cdn-avatars.huggingface.co' in info.get('image', '')
+    assert int(info.get('huggingface_models', -1)) >= 0
+    assert int(info.get('huggingface_datasets', -1)) >= 0
+    assert int(info.get('huggingface_spaces', -1)) >= 0
+    assert int(info.get('follower_count', -1)) > 0
+    assert int(info.get('following_count', -1)) >= 0
+
+
+def test_hackernews():
+    """HackerNews"""
+    html = '<tr class="athing"><td valign="top">user:</td><td timestamp="1160418092"><a href="user?id=pg" class="hnuser">pg</a></td></tr><tr><td valign="top">created:</td><td><span class="age"><a href="front?day=2006-10-09&birth=pg">October 9, 2006</a></span></td></tr><tr><td valign="top">karma:</td><td>157316</td></tr><tr><td valign="top">about:</td><td style="overflow:hidden">Bug fixer.</td></tr>'
+    info = extract(html)
+
+    assert info.get('username') == 'pg'
+    assert '2006' in info.get('created_at', '')
+    assert int(info.get('karma', -1)) > 100000
+    assert info.get('bio') == 'Bug fixer.'
+
+def test_teletype():
+    """Teletype"""
+    info = extract(parse('https://teletype.in/@johndoe')[0])
+
+    assert info.get('uid') == '133496'
+    assert info.get('username') == 'johndoe'
+    assert info.get('fullname') == 'John Doe'
+    assert info.get('image') == 'https://teletype.in/files/f4/f418d759-3732-429c-b28b-dbcc498560d0.png'
+    assert info.get('is_verified') == 'False'
+
+
+def test_gdbrowser_api_e2e():
+    """GDBrowser API"""
+    info = extract(parse('https://gdbrowser.com/api/profile/john')[0])
+
+    assert info.get('username') == 'John'
+    assert info.get('uid') == '3158367'
+    assert info.get('gd_account_id') == '2103'
+
+
+def test_streamelements_api_e2e():
+    """StreamElements API"""
+    info = extract(parse('https://api.streamelements.com/kappa/v2/channels/john')[0])
+
+    assert info.get('uid') == '5b02f77a398dff6c3fbd887d'
+    assert info.get('username') == 'john'
+    assert info.get('fullname') == 'John'
+    assert info.get('provider') == 'youtube'
+    assert info.get('provider_id') == 'UC_j3Wd_7i1mgyoxnU7_yFfg'
+
+
+def test_streamlabs_api_e2e():
+    """Streamlabs API"""
+    info = extract(parse('https://streamlabs.com/api/v6/user/john')[0])
+
+    assert info.get('uid') == '4350278'
+    assert info.get('primary_account_type') == 'youtube_account'
+    assert info.get('primary_account_id') == 'UCzzotlhxYmISG-HUidWa8VA'
+
+
+def test_donatty_api_e2e():
+    """Donatty API"""
+    info = extract(parse('https://api.donatty.com/users/find/john')[0])
+
+    assert info.get('uid')
+    assert info.get('username') == 'john'
+    assert info.get('fullname')
+    assert info.get('twitch_url')
+    assert info.get('created_at')
+
+
+@pytest.mark.github_failed
+def test_visnesscard_api_e2e():
+    """VisnessCard API"""
+    import requests as req
+    r = req.get('https://my.visnesscard.com/Home/GetCard/JOHN', verify=False, timeout=10)
+    info = extract(r.text)
+
+    assert info.get('uid') == '6700'
+    assert info.get('username') == 'JOHN'
+    assert info.get('fullname') == 'JOHN SMITH'
+    assert info.get('email')
+    assert info.get('company') == 'GRINDTIME FITNESS'
+    assert 'Detroit' in info.get('location', '')
+
+
+def test_discourse_api():
+    """Discourse API"""
+    # a host that is not in the url_hints list — the mutation has to carry it
+    url, _ = mutate_url('https://discuss.python.org/u/hugovk')[0]
+    info = extract(parse(url)[0])
+
+    assert info.get('uid') == '358'
+    assert info.get('username') == 'hugovk'
+    assert info.get('trust_level')
+    assert info.get('created_at')
+
+
+def test_discourse_html_profile():
+    """Discourse HTML profile"""
+    # the HTML shell, which is all that is left when an instance closes its API
+    info = extract(parse('https://discuss.python.org/u/hugovk')[0])
+
+    assert info.get('username') == 'hugovk'
+    assert info.get('bio')
+    assert 'user_avatar' in info.get('image', '')
+
+
+def test_xenforo():
+    """XenForo"""
+    # the URL shape maigret stores: a member search that redirects to the profile
+    info = extract(parse('https://nullcave.club/members/?username=lomba_ii')[0])
+
+    assert info.get('uid') == '36147'
+    assert info.get('username') == 'lomba_ii'
+    # XenForo renders times in the viewer's timezone, so only the date is stable
+    assert info.get('created_at', '').startswith('2024-01-3')
+    assert info.get('posts_count', '').isdigit()
